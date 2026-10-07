@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harmony Generator</title>
+<meta name="description" content="Upload a song and sing the lead over AI-generated harmony vocals. Runs entirely in your browser.">
+<script src="coi-serviceworker.js"></script>
+<style>
+  :root {
+    --bg: #f6f4ef; --card: #fff; --ink: #1d1b19; --muted: #6b665f; --line: #e3ded5;
+    --accent: #c2410c; --accent-soft: #fde8dc; --ok: #15803d; --err: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151413; --card: #1f1d1b; --ink: #f1ede6; --muted: #a39d94; --line: #34312d;
+            --accent: #fb923c; --accent-soft: #3a2519; --ok: #4ade80; --err: #f87171; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 6px; }
+  .privacy { color: var(--ok); font-size: 13px; margin: 0 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+          padding: 20px; margin-bottom: 16px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  label.field { display: block; font-weight: 600; font-size: 13px; margin: 14px 0 6px; }
+  input[type=text], select { width: 100%; padding: 10px 12px; border-radius: 9px;
+          border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; }
+  .drop { display: block; border: 2px dashed var(--line); border-radius: 12px; padding: 22px 16px; text-align: center;
+          cursor: pointer; transition: border-color .15s, background .15s; }
+  .drop.over, .drop:hover { border-color: var(--accent); background: var(--accent-soft); }
+  .drop strong { display: block; margin-bottom: 2px; }
+  .drop input { display: none; }
+  .picked { margin-top: 10px; font-size: 14px; }
+  .or { text-align: center; color: var(--muted); font-size: 13px; margin: 14px 0 8px; }
+  .search { display: flex; gap: 8px; }
+  .search input { flex: 1; }
+  .results { margin-top: 10px; display: grid; gap: 6px; }
+  .result { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line);
+            border-radius: 10px; }
+  .result img { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; flex: none; }
+  .result .meta { flex: 1; min-width: 0; }
+  .result .meta div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .result button { padding: 7px 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { position: relative; }
+  .chip input { position: absolute; opacity: 0; }
+  .chip span { display: inline-block; padding: 7px 12px; border-radius: 999px;
+               border: 1px solid var(--line); cursor: pointer; user-select: none; font-size: 14px; }
+  .chip input:checked + span { background: var(--accent-soft); border-color: var(--accent);
+                               color: var(--accent); font-weight: 600; }
+  .chip input:focus-visible + span { outline: 2px solid var(--accent); }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 11px 18px;
+           background: var(--accent); color: #fff; cursor: pointer; }
+  button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+  .bar { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; margin-top: 10px; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .err { color: var(--err); white-space: pre-wrap; font-size: 13px; }
+  .track { display: grid; grid-template-columns: 130px 1fr 64px; gap: 12px; align-items: center;
+           padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .track:last-child { border-bottom: 0; }
+  .track a, .track .val { font-size: 12px; color: var(--muted); text-align: right; }
+  .track.fx { border-top: 1px dashed var(--line); margin-top: 4px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .transport { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .transport button { width: 48px; height: 48px; border-radius: 50%; padding: 0; font-size: 18px; flex: none; }
+  .time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; min-width: 90px; }
+  .hidden { display: none; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 28px; }
+  footer a { color: inherit; }
+  @media (max-width: 520px) { .track { grid-template-columns: 90px 1fr 48px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Harmony Generator</h1>
+  <p class="sub">Pick a song, choose your harmony parts, then sing the lead over the backing track and generated harmonies.</p>
+  <p class="privacy">Runs entirely in your browser. Your music never leaves your computer.</p>
+
+  <!-- 1. Song -->
+  <section class="card" id="newCard">
+    <h2>1 · Choose a song</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept="audio/*,video/*">
+      <strong>Drop an audio file here, or click to choose</strong>
+      <span class="muted">MP3, WAV, M4A, OGG… up to <span id="maxMin">8</span> minutes</span>
+    </label>
+    <div class="picked muted" id="picked"></div>
+
+    <div id="jamendoBox" class="hidden">
+      <div class="or">or search free songs (Creative Commons, from Jamendo)</div>
+      <form class="search" id="searchForm">
+        <input type="text" id="query" placeholder="Artist, song, or mood (e.g. acoustic pop)" aria-label="Search free songs">
+        <button class="secondary" type="submit">Search</button>
+      </form>
+      <div class="results" id="results"></div>
+    </div>
+
+    <label class="field">Harmony parts</label>
+    <div class="chips" id="intervalChips"></div>
+
+    <label class="field" for="style">Harmony style</label>
+    <select id="style"></select>
+    <p class="muted" style="margin:6px 0 0"><b>Backing vocals</b>: holds notes and joins your note now and then. <b>Twin lead</b>: moves alongside the melody like two guitars in harmony, and meets it on the same note at phrase starts and ends.</p>
+
+    <label class="field" for="unison">How often the harmony sings your note (unison)</label>
+    <select id="unison"></select>
+
+    <label class="field" for="key">Key</label>
+    <select id="key"></select>
+
+    <div class="row"><button id="go" disabled>Generate harmonies</button>
+      <span class="muted" id="firstTime">First time? The page downloads a ~65 MB AI model once, then remembers it.</span></div>
+  </section>
+
+  <!-- 2. Progress -->
+  <section class="card hidden" id="progressCard">
+    <h2 id="songTitle">Working…</h2>
+    <div id="stage" class="muted">Starting</div>
+    <div class="bar"><div id="barFill"></div></div>
+    <p class="muted" style="margin:10px 0 0">Keep this tab open while it works.</p>
+    <div id="error" class="err"></div>
+  </section>
+
+  <!-- 3. Mixer -->
+  <section class="card hidden" id="mixerCard">
+    <h2 id="mixTitle">Sing along</h2>
+    <p class="muted" id="credit"></p>
+    <p class="muted" id="keyInfo"></p>
+    <div class="transport">
+      <button id="play" aria-label="Play">▶</button>
+      <input type="range" id="seek" min="0" max="1000" value="0" aria-label="Position">
+      <span class="time" id="time">0:00 / 0:00</span>
+    </div>
+    <div id="tracks"></div>
+
+    <h2 style="margin-top:22px">Try different harmonies</h2>
+    <div class="chips" id="reChips"></div>
+    <label class="field" for="reStyle">Harmony style</label>
+    <select id="reStyle"></select>
+    <label class="field" for="reUnison">How often the harmony sings your note (unison)</label>
+    <select id="reUnison"></select>
+    <label class="field" for="reKey">Key</label>
+    <select id="reKey"></select>
+    <div class="row">
+      <button id="regen" class="secondary">Regenerate harmonies</button>
+      <button id="mixDl" class="secondary">Download my mix (.wav)</button>
+    </div>
+  </section>
+
+  <footer>
+    Vocal separation: MDX-Net model from the Ultimate Vocal Remover project, run with onnxruntime-web.
+    Only use songs you have the right to use.
+  </footer>
+</main>
+
+<script src="js/config.js"></script>
+<script src="js/dsp.js"></script>
+<script src="js/harmony.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

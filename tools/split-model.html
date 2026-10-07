@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model Splitter</title>
+<style>
+  :root { --bg:#f6f4ef; --card:#fff; --ink:#1d1b19; --muted:#6b665f; --line:#e3ded5; --accent:#c2410c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#151413; --card:#1f1d1b; --ink:#f1ede6; --muted:#a39d94; --line:#34312d; --accent:#fb923c; } }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:32px 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; }
+  button { font:inherit; font-weight:600; border:0; border-radius:10px; padding:11px 18px; background:var(--accent); color:#fff; cursor:pointer; }
+  button:disabled { opacity:.5; }
+  .muted { color:var(--muted); font-size:13px; }
+  li { margin:4px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Model splitter</h1>
+  <div class="card">
+    <p>GitHub's website only accepts files up to 25 MB, and the AI model is bigger. This page cuts it into
+       20 MB pieces and writes the <code>manifest.json</code> file the website needs.
+       Nothing is uploaded: it all happens on your computer.</p>
+    <p><b>1.</b> Choose the model file (for example <code>Kim_Vocal_2.onnx</code>):</p>
+    <input type="file" id="f" accept=".onnx">
+    <p><b>2.</b> Click the button. Your browser saves several files (it may ask to allow multiple downloads: say yes).</p>
+    <button id="go" disabled>Split and download</button>
+    <ul id="out" class="muted"></ul>
+    <p class="muted"><b>3.</b> Upload all of these files into the <code>models</code> folder of your GitHub repository.</p>
+  </div>
+</main>
+<script>
+const PART = 20 * 1024 * 1024;
+const $ = (id) => document.getElementById(id);
+$("f").onchange = () => { $("go").disabled = !$("f").files[0]; };
+const save = (blob, name) => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+};
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+$("go").onclick = async () => {
+  const file = $("f").files[0];
+  const base = file.name.replace(/\.onnx$/i, "");
+  const parts = [];
+  $("go").disabled = true;
+  for (let i = 0, k = 1; i < file.size; i += PART, k++) {
+    const name = `${base}.onnx.part${k}`;
+    const blob = file.slice(i, Math.min(file.size, i + PART));
+    save(blob, name);
+    parts.push({ file: name, bytes: blob.size });
+    $("out").insertAdjacentHTML("beforeend", `<li>${name} (${(blob.size / 1048576).toFixed(1)} MB)</li>`);
+    await wait(600);
+  }
+  const manifest = {
+    name: base,
+    // settings for UVR MDX-Net vocal models such as Kim_Vocal_2 / UVR-MDX-NET-Voc_FT
+    settings: { nFft: 7680, hop: 1024, compensate: 1.009 },
+    parts,
+  };
+  save(new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" }), "manifest.json");
+  $("out").insertAdjacentHTML("beforeend", "<li>manifest.json</li>");
+  $("go").disabled = false;
+};
+</script>
+</body>
+</html>
